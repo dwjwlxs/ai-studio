@@ -22,13 +22,214 @@ class ModelSelector extends ConsumerStatefulWidget {
 }
 
 class _ModelSelectorState extends ConsumerState<ModelSelector> {
-  final _customController = TextEditingController();
+  final _controller = TextEditingController();
+  final _focusNode = FocusNode();
+  final _layerLink = LayerLink();
+  OverlayEntry? _overlayEntry;
+  bool _isOpen = false;
+  String _query = '';
   bool _isCustomMode = false;
+  final _customController = TextEditingController();
 
   @override
   void dispose() {
+    _closeOverlay();
+    _controller.dispose();
+    _focusNode.dispose();
     _customController.dispose();
     super.dispose();
+  }
+
+  bool _matchesFuzzy(String text, String query) {
+    if (query.isEmpty) return true;
+    final lower = text.toLowerCase();
+    final q = query.toLowerCase();
+    if (lower.contains(q)) return true;
+    // Fuzzy: all query chars appear in order
+    int qi = 0;
+    for (int i = 0; i < lower.length && qi < q.length; i++) {
+      if (lower[i] == q[qi]) qi++;
+    }
+    return qi == q.length;
+  }
+
+  void _openOverlay(List<ModelInfo> models) {
+    if (_isOpen) return;
+    _isOpen = true;
+    _query = '';
+    _controller.clear();
+    _focusNode.requestFocus();
+
+    _overlayEntry = _buildOverlay(models);
+    Overlay.of(context).insert(_overlayEntry!);
+  }
+
+  void _closeOverlay() {
+    _overlayEntry?.remove();
+    _overlayEntry = null;
+    _isOpen = false;
+  }
+
+  void _selectModel(String id) {
+    widget.onChanged(id);
+    _closeOverlay();
+  }
+
+  OverlayEntry _buildOverlay(List<ModelInfo> models) {
+    final renderBox = context.findRenderObject() as RenderBox;
+    final size = renderBox.size;
+
+    return OverlayEntry(
+      builder: (context) => Stack(
+        children: [
+          // Tap-away layer
+          Positioned.fill(
+            child: GestureDetector(
+              behavior: HitTestBehavior.translucent,
+              onTap: _closeOverlay,
+              child: Container(color: Colors.transparent),
+            ),
+          ),
+          // Dropdown panel
+          Positioned(
+            width: size.width.clamp(280.0, 480.0),
+            child: CompositedTransformFollower(
+              link: _layerLink,
+              showWhenUnlinked: false,
+              offset: Offset(0, size.height + 2),
+              child: Material(
+                elevation: 8,
+                borderRadius: BorderRadius.circular(8),
+                clipBehavior: Clip.antiAlias,
+                child: ConstrainedBox(
+                  constraints: const BoxConstraints(maxHeight: 360),
+                  child: Column(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      // Search field
+                      Padding(
+                        padding: const EdgeInsets.all(8),
+                        child: TextField(
+                          controller: _controller,
+                          focusNode: _focusNode,
+                          decoration: InputDecoration(
+                            hintText: 'Search models...',
+                            prefixIcon:
+                                const Icon(Icons.search, size: 18),
+                            suffixIcon: _query.isNotEmpty
+                                ? IconButton(
+                                    icon: const Icon(Icons.clear,
+                                        size: 16),
+                                    onPressed: () {
+                                      _controller.clear();
+                                      _query = '';
+                                      _overlayEntry?.markNeedsBuild();
+                                    },
+                                  )
+                                : null,
+                            isDense: true,
+                            contentPadding: const EdgeInsets.symmetric(
+                                horizontal: 8, vertical: 8),
+                            border: const OutlineInputBorder(),
+                          ),
+                          onChanged: (v) {
+                            _query = v;
+                            _overlayEntry?.markNeedsBuild();
+                          },
+                          onSubmitted: (v) {
+                            // If exact match, select it
+                            final match = models.firstWhere(
+                              (m) => m.id.toLowerCase() ==
+                                  v.trim().toLowerCase(),
+                              orElse: () => models.first,
+                            );
+                            _selectModel(match.id);
+                          },
+                        ),
+                      ),
+                      const Divider(height: 1),
+                      // Filtered list
+                      Flexible(
+                        child: _buildFilteredList(models),
+                      ),
+                    ],
+                  ),
+                ),
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildFilteredList(List<ModelInfo> models) {
+    final filtered =
+        models.where((m) => _matchesFuzzy(m.id, _query)).toList();
+
+    if (filtered.isEmpty && !widget.allowCustom) {
+      return Padding(
+        padding: const EdgeInsets.all(16),
+        child: Text('No models match "$_query"',
+            style: Theme.of(context).textTheme.bodySmall),
+      );
+    }
+
+    // +1 for the "Custom model ID..." entry when allowCustom
+    final extraItemCount = widget.allowCustom ? 1 : 0;
+    final totalItems = filtered.length + extraItemCount;
+
+    if (totalItems == 0) {
+      return Padding(
+        padding: const EdgeInsets.all(16),
+        child: Text('No models match "$_query"',
+            style: Theme.of(context).textTheme.bodySmall),
+      );
+    }
+
+    return ListView.builder(
+      shrinkWrap: true,
+      itemCount: totalItems,
+      itemBuilder: (context, index) {
+        // Custom model ID entry at the bottom
+        if (index >= filtered.length) {
+          return ListTile(
+            dense: true,
+            visualDensity: VisualDensity.compact,
+            leading: const Icon(Icons.edit, size: 16),
+            title: const Text('Custom model ID...',
+                style: TextStyle(
+                    fontStyle: FontStyle.italic, fontSize: 13)),
+            onTap: () {
+              _closeOverlay();
+              _switchToCustom();
+            },
+          );
+        }
+
+        final model = filtered[index];
+        final isSelected = model.id == widget.value;
+        return ListTile(
+          dense: true,
+          visualDensity: VisualDensity.compact,
+          selected: isSelected,
+          title: Text(
+            model.id,
+            style: TextStyle(
+              fontSize: 13,
+              fontWeight:
+                  isSelected ? FontWeight.w600 : FontWeight.normal,
+            ),
+          ),
+          trailing: isSelected
+              ? Icon(Icons.check,
+                  size: 16,
+                  color: Theme.of(context).colorScheme.primary)
+              : null,
+          onTap: () => _selectModel(model.id),
+        );
+      },
+    );
   }
 
   void _switchToCustom() {
@@ -67,9 +268,6 @@ class _ModelSelectorState extends ConsumerState<ModelSelector> {
             widget.filter != null ? models.where(widget.filter!) : models;
         final items = filtered.toList();
         final allModels = models.toList();
-
-        // If filter produced no results but there are models available,
-        // show all models instead
         final displayItems = items.isEmpty && allModels.isNotEmpty
             ? allModels
             : items;
@@ -85,43 +283,56 @@ class _ModelSelectorState extends ConsumerState<ModelSelector> {
         return Row(
           mainAxisSize: MainAxisSize.min,
           children: [
-            DropdownButton<String>(
-              value: widget.value != null &&
-                      displayItems.any((m) => m.id == widget.value)
-                  ? widget.value
-                  : null,
-              hint: Text(
-                widget.value ?? 'Select model',
-                overflow: TextOverflow.ellipsis,
-              ),
-              items: [
-                ...displayItems
-                    .map((m) => DropdownMenuItem(
-                          value: m.id,
-                          child: Text(m.id,
-                              overflow: TextOverflow.ellipsis),
-                        )),
-                if (widget.allowCustom)
-                  const DropdownMenuItem<String>(
-                    value: '__custom__',
-                    child: Row(
-                      children: [
-                        Icon(Icons.edit, size: 14),
-                        SizedBox(width: 4),
-                        Text('Custom model ID...',
-                            style: TextStyle(fontStyle: FontStyle.italic)),
-                      ],
-                    ),
+            CompositedTransformTarget(
+              link: _layerLink,
+              child: GestureDetector(
+                onTap: () {
+                  if (_isOpen) {
+                    _closeOverlay();
+                  } else {
+                    _openOverlay(displayItems);
+                  }
+                },
+                child: Container(
+                  constraints:
+                      const BoxConstraints(minWidth: 160, maxWidth: 320),
+                  padding: const EdgeInsets.symmetric(
+                      horizontal: 10, vertical: 6),
+                  decoration: BoxDecoration(
+                    border: Border.all(
+                        color: _isOpen
+                            ? Theme.of(context).colorScheme.primary
+                            : Theme.of(context).colorScheme.outline),
+                    borderRadius: BorderRadius.circular(4),
                   ),
-              ],
-              onChanged: (v) {
-                if (v == '__custom__') {
-                  _switchToCustom();
-                } else {
-                  widget.onChanged(v);
-                }
-              },
-              isDense: true,
+                  child: Row(
+                    children: [
+                      Expanded(
+                        child: Text(
+                          widget.value ?? 'Select model',
+                          overflow: TextOverflow.ellipsis,
+                          style: TextStyle(
+                            fontSize: 13,
+                            color: widget.value != null
+                                ? Theme.of(context).colorScheme.onSurface
+                                : Theme.of(context).hintColor,
+                          ),
+                        ),
+                      ),
+                      const SizedBox(width: 4),
+                      Icon(
+                        _isOpen
+                            ? Icons.arrow_drop_up
+                            : Icons.arrow_drop_down,
+                        size: 20,
+                        color: Theme.of(context)
+                            .colorScheme
+                            .onSurfaceVariant,
+                      ),
+                    ],
+                  ),
+                ),
+              ),
             ),
             if (widget.value != null &&
                 !displayItems.any((m) => m.id == widget.value))
@@ -204,7 +415,6 @@ class _RefreshButtonState extends State<_RefreshButton> {
     if (_isRefreshing) return;
     setState(() => _isRefreshing = true);
     widget.onRefresh();
-    // Give the FutureProvider time to start loading
     Future.delayed(const Duration(milliseconds: 500), () {
       if (mounted) setState(() => _isRefreshing = false);
     });

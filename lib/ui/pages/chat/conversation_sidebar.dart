@@ -149,17 +149,26 @@ class _ConversationTile extends StatelessWidget {
                   const SizedBox(height: 2),
                   Row(
                     children: [
-                      if (conversation.model.isNotEmpty) ...[
-                        Icon(Icons.smart_toy, size: 10,
-                            color: colorScheme.onSurfaceVariant),
-                        const SizedBox(width: 3),
-                        Text(
-                          conversation.model.length > 20
-                              ? '${conversation.model.substring(0, 20)}...'
-                              : conversation.model,
-                          style: TextStyle(
-                            fontSize: 10,
-                            color: colorScheme.onSurfaceVariant,
+                      if (conversation.model.isNotEmpty) ...[ 
+                        Flexible(
+                          child: Row(
+                            mainAxisSize: MainAxisSize.min,
+                            children: [
+                              Icon(Icons.smart_toy, size: 10,
+                                  color: colorScheme.onSurfaceVariant),
+                              const SizedBox(width: 3),
+                              Flexible(
+                                child: Text(
+                                  conversation.model,
+                                  maxLines: 1,
+                                  overflow: TextOverflow.ellipsis,
+                                  style: TextStyle(
+                                    fontSize: 10,
+                                    color: colorScheme.onSurfaceVariant,
+                                  ),
+                                ),
+                              ),
+                            ],
                           ),
                         ),
                         const SizedBox(width: 8),

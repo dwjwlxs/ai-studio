@@ -14,20 +14,13 @@ class _ServerConfigPageState extends ConsumerState<ServerConfigPage> {
   late TextEditingController _apiKeyController;
   bool _isTesting = false;
   bool? _testResult;
+  bool _configLoaded = false;
 
   @override
   void initState() {
     super.initState();
     _urlController = TextEditingController();
     _apiKeyController = TextEditingController();
-    // Initialize after first frame
-    WidgetsBinding.instance.addPostFrameCallback((_) {
-      final config = ref.read(serverConfigProvider).valueOrNull;
-      if (config != null) {
-        _urlController.text = config.gatewayUrl;
-        _apiKeyController.text = config.apiKey;
-      }
-    });
   }
 
   @override
@@ -72,6 +65,17 @@ class _ServerConfigPageState extends ConsumerState<ServerConfigPage> {
 
   @override
   Widget build(BuildContext context) {
+    // Listen for config data arriving from async load
+    ref.listen(serverConfigProvider, (prev, next) {
+      next.whenData((config) {
+        if (!_configLoaded) {
+          _configLoaded = true;
+          _urlController.text = config.gatewayUrl;
+          _apiKeyController.text = config.apiKey;
+        }
+      });
+    });
+
     return Padding(
       padding: const EdgeInsets.all(32),
       child: Center(
