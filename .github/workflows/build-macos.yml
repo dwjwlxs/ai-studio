@@ -1,0 +1,60 @@
+name: Build macOS Release
+
+on:
+  release:
+    types: [published]
+
+jobs:
+  build-macos:
+    runs-on: macos-latest
+    permissions:
+      contents: write
+    
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+      
+      - name: Setup Flutter
+        uses: subosito/flutter-action@v2
+        with:
+          channel: stable
+          cache: true
+      
+      - name: Enable macOS desktop
+        run: flutter config --enable-macos-desktop
+      
+      - name: Get dependencies
+        run: flutter pub get
+      
+      - name: Build macOS release
+        run: flutter build macos --release
+      
+      - name: Create DMG installer
+        run: |
+          VERSION="${{ github.event.release.tag_name }}"
+          APP_NAME="AI Studio"
+          APP_PATH="build/macos/Build/Products/Release/ai_studio.app"
+          DMG_NAME="ai-studio-${VERSION}-macos.dmg"
+          
+          # Create a temporary directory for the DMG source
+          mkdir -p dmg_source
+          cp -R "$APP_PATH" dmg_source/
+          
+          # Create symlink to /Applications for drag-to-install
+          ln -s /Applications dmg_source/Applications
+          
+          # Create DMG
+          hdiutil create -volname "$APP_NAME" \
+            -srcfolder dmg_source \
+            -ov -format UDZO \
+            "$DMG_NAME"
+          
+          # Cleanup
+          rm -rf dmg_source
+          
+          echo "DMG_NAME=$DMG_NAME" >> $GITHUB_ENV
+      
+      - name: Upload to release
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: gh release upload ${{ github.event.release.tag_name }} ${{ env.DMG_NAME }} --clobber
