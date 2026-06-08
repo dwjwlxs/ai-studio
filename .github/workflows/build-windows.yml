@@ -23,9 +23,37 @@ jobs:
       
       - name: Get dependencies
         run: flutter pub get
+
+      - name: Cache mpv library
+        uses: actions/cache@v4
+        with:
+          path: build/windows/x64/mpv-dev*
+          key: mpv-lib-${{ runner.os }}-${{ hashFiles('pubspec.lock') }}
+          restore-keys: |
+            mpv-lib-${{ runner.os }}-
       
-      - name: Build Windows release
-        run: flutter build windows --release
+      - name: Build Windows release (with retry)
+        shell: pwsh
+        run: |
+          $maxRetries = 3
+          for ($i = 1; $i -le $maxRetries; $i++) {
+            Write-Host "=== Build attempt $i of $maxRetries ==="
+            try {
+              flutter build windows --release
+              if ($LASTEXITCODE -eq 0) {
+                Write-Host "Build succeeded on attempt $i"
+                exit 0
+              }
+            } catch {
+              Write-Host "Build attempt $i failed: $_"
+            }
+            if ($i -lt $maxRetries) {
+              Write-Host "Waiting 30 seconds before retry..."
+              Start-Sleep -Seconds 30
+            }
+          }
+          Write-Host "Build failed after $maxRetries attempts"
+          exit 1
       
       - name: Create ZIP archive
         run: |
